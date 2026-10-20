@@ -40,7 +40,7 @@ return [
         'internal_url' => env('SSO_INTERNAL_URL', env('SSO_BASE_URL', 'http://sso-engine.test')),
         'client_id'    => env('SSO_CLIENT_ID'),
         'redirect_uri' => env('SSO_REDIRECT_URI', 'http://inventory.test/callback'),
-        'public_key'   => storage_path('app/keys/public.pem'),
+        'public_key'   => file_exists(base_path('keys/public.pem')) ? base_path('keys/public.pem') : storage_path('app/keys/public.pem'),
     ],
 
 ];

@@ -23,7 +23,7 @@ class VerifySsoToken
             return $this->redirectToSso($request);
         }
 
-        $publicKeyPath = config('services.sso.public_key') ?: storage_path('app/keys/public.pem');
+        $publicKeyPath = config('services.sso.public_key') ?: (file_exists(base_path('keys/public.pem')) ? base_path('keys/public.pem') : storage_path('app/keys/public.pem'));
 
         // Fallback create keys dir if missing
         if (!file_exists($publicKeyPath)) {
@@ -192,6 +192,11 @@ class VerifySsoToken
         $clientId    = config('services.sso.client_id') ?: env('SSO_CLIENT_ID', 'inventory-app');
         $redirectUri = config('services.sso.redirect_uri') ?: env('SSO_REDIRECT_URI', 'http://inventory.test/callback');
         $baseUrl = config('services.sso.base_url') ?: env('SSO_BASE_URL', 'http://sso.localhost');
+
+        if ($request->isSecure() || str_contains($request->getHost(), 'sslip.io')) {
+            $baseUrl = str_replace('http://sso.', 'https://sso.', $baseUrl);
+            $redirectUri = str_replace('http://inventory.', 'https://inventory.', $redirectUri);
+        }
 
         $query = http_build_query([
             'client_id'    => $clientId,
