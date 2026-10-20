@@ -47,10 +47,12 @@ class VerifySsoToken
 
         try {
             $publicKey = file_get_contents($publicKeyPath);
+            JWT::$leeway = 60;
             $decoded = JWT::decode($token, new Key($publicKey, 'RS256'));
 
             // INSTANT SLO: Cek Redis Blacklist (< 0.1ms)
             if (!empty($decoded->jti) && $this->isBlacklisted($decoded->jti)) {
+                \Illuminate\Support\Facades\Log::warning('[VerifySsoToken] JTI is blacklisted: ' . $decoded->jti);
                 \Illuminate\Support\Facades\Auth::logout();
                 $request->session()->invalidate();
                 $request->session()->regenerateToken();
@@ -76,6 +78,7 @@ class VerifySsoToken
                     $request->session()->put('sso_refresh_token', $data['refresh_token']);
                     
                     $publicKey = file_get_contents($publicKeyPath);
+                    JWT::$leeway = 60;
                     $decoded = JWT::decode($token, new Key($publicKey, 'RS256'));
 
                     // Cek blacklist juga pada token baru
@@ -86,25 +89,38 @@ class VerifySsoToken
                         return $this->redirectToSso($request);
                     }
                 } else {
+                    \Illuminate\Support\Facades\Log::error('[VerifySsoToken] Token refresh failed: ' . $response->body());
                     \Illuminate\Support\Facades\Auth::logout();
                     $request->session()->forget('sso_token');
                     $request->session()->forget('sso_refresh_token');
                     return $this->redirectToSso($request);
                 }
             } else {
+                \Illuminate\Support\Facades\Log::warning('[VerifySsoToken] Token expired and no refresh token found.');
                 \Illuminate\Support\Facades\Auth::logout();
                 $request->session()->forget('sso_token');
                 return $this->redirectToSso($request);
             }
         } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('[VerifySsoToken] SSO JWT verify error: ' . $e->getMessage(), [
+                'exception' => get_class($e),
+                'url'       => $request->fullUrl(),
+            ]);
             \Illuminate\Support\Facades\Auth::logout();
             $request->session()->forget('sso_token');
+            $request->session()->forget('sso_refresh_token');
+
+            // If this is the callback URL with incoming tokens, do NOT loop back to SSO to prevent an instant bounce loop
+            if ($request->is('callback') || $request->has('access_token') || $request->has('token')) {
+                abort(401, 'Gagal memverifikasi token SSO (' . $e->getMessage() . '). Silakan refresh dan coba login kembali.');
+            }
+
             return $this->redirectToSso($request);
         }
 
-        // Bypass DB check if user already logged in with same sso_user_id
+        // Bypass DB check if user already logged in with same sso_user_id or email
         $currentUser = \Illuminate\Support\Facades\Auth::user();
-        if ($currentUser && $currentUser->sso_user_id === $decoded->sub) {
+        if ($currentUser && ($currentUser->sso_user_id === $decoded->sub || $currentUser->email === $decoded->email)) {
             $request->session()->put('sso_token', $token);
             return $next($request);
         }

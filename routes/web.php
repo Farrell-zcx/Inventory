@@ -7,7 +7,8 @@ Route::get('/', function () {
 });
 
 Route::middleware('sso.auth')->group(function () {
-    Route::get('/callback', function () {
+    Route::get('/callback', function (\Illuminate\Http\Request $request) {
+        $request->session()->save();
         return redirect('/dashboard');
     });
 
