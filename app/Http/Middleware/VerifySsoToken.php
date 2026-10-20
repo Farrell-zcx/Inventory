@@ -48,7 +48,26 @@ class VerifySsoToken
         try {
             $publicKey = file_get_contents($publicKeyPath);
             JWT::$leeway = 60;
-            $decoded = JWT::decode($token, new Key($publicKey, 'RS256'));
+
+            try {
+                $decoded = JWT::decode($token, new Key($publicKey, 'RS256'));
+            } catch (\Firebase\JWT\SignatureInvalidException $sigEx) {
+                // If signature failed, public key might have been rotated on SSO Engine.
+                // Fetch fresh public key from SSO Engine and retry once
+                $ssoBase = config('services.sso.internal_url') ?: config('services.sso.base_url') ?: env('SSO_BASE_URL', 'http://sso-engine');
+                try {
+                    $pkResponse = \Illuminate\Support\Facades\Http::timeout(3)->get(rtrim($ssoBase, '/') . '/public-key');
+                    if ($pkResponse->successful() && !empty(trim($pkResponse->body()))) {
+                        $publicKey = $pkResponse->body();
+                        @file_put_contents($publicKeyPath, $publicKey);
+                        $decoded = JWT::decode($token, new Key($publicKey, 'RS256'));
+                    } else {
+                        throw $sigEx;
+                    }
+                } catch (\Exception $fetchEx) {
+                    throw $sigEx;
+                }
+            }
 
             // INSTANT SLO: Cek Redis Blacklist (< 0.1ms)
             if (!empty($decoded->jti) && $this->isBlacklisted($decoded->jti)) {
